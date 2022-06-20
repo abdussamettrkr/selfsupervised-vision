@@ -12,16 +12,12 @@ import models.vit as vits
 from models.vit import DINOHead
 from losses.loss import DINOLoss
 
-from pyexpat import model
-
-
-
-
-
-
-
-# Temperature teacher parameters
-
+import time
+import math
+import sys
+from pathlib import Path
+import json
+import datetime
 
 
 
@@ -94,7 +90,7 @@ def parse_opt():
     models = ['vit_tiny','vit_small','vit_base','xcit','deit_tiny','deit_small']
 
     parser = argparse.ArgumentParser('DINO', add_help=False)
-    parser.add_argument('--model',default ='vit_small',type=str,choices= models,help="Name of the model. Default vit_small")
+    parser.add_argument('--arch',default ='vit_small',type=str,choices= models,help="Name of the model. Default vit_small")
     parser.add_argument('--patch_size',default=16,type=int,help="VIT square patch sizes. Default 16")
     parser.add_argument('--out_dim',default=65536,type=int,help="Dimensionality of the DINO head output, bigger valus for complex tax. Default 65536")
     parser.add_argument('--norm_last_layer',default=True,type=bool,help="Whether or not normilize the last layer of DINO head. Increases Training stability. Default True")
@@ -111,7 +107,7 @@ def parse_opt():
 
     # Training/Optimization parameters
     # Improves training time and memory requirements, but can provoke instability and slight decay of performance. We recommend disabling mixed precision if the loss is unstable, if reducing the patch size or if training with bigger ViTs.
-    parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or notto use half precision for training.""")
+    parser.add_argument('--use_fp16', type=bool, default=True, help="""Whether or notto use half precision for training.""")
 
     # With ViT, a smaller value at the beginning of training works well.
     parser.add_argument('--weight_decay', type=float, default=0.04, help="""Initial value of the weight decay.""")
@@ -152,8 +148,8 @@ def parse_opt():
     parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
-
-    return parser
+    args = parser.parse_args()
+    return args
 
 
 def main(args):
@@ -164,19 +160,19 @@ def main(args):
         local_crops_number=args.local_crops_number,
         local_crops_scale=args.local_crops_scale)
     
-    dataset = datasets(args.data_path, transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)    
+    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    #sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)    
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        sampler=sampler,
+        #sampler=sampler,
         batch_size=args.batch_size_per_gpu,
-        num_workes=args.num_works,
+        num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True
     )
     print(f"Data loaded: there are {len(dataset)} images.")
 
-    student,teacher = get_models(args)
+    student,teacher,teacher_without_ddp = get_models(args)
 
 
     # ============ preparing loss ... ============
@@ -221,11 +217,113 @@ def main(args):
 
 
     ##Optionally resume training
+    start_epoch = resume_training()
 
+
+
+    start_time = time.time()
+    for epoch in range(start_epoch,args.epochs):
+        #data_loader.sampler.set_epoch(epoch)
+        # ============ training one epoch of DINO ... ============
+        train_stats = train_one_epoch(student, teacher, teacher_without_ddp, dino_loss,
+            data_loader, optimizer, lr_schedule, wd_schedule, momentum_schedule,
+            epoch, fp16_scaler, args)
+
+        
+        save_dict = {
+            'student': student.state_dict(),
+            'teacher': teacher.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'epoch': epoch + 1,
+            'args': args,
+            'dino_loss': dino_loss.state_dict(),
+        }
+        if fp16_scaler is not None:
+            save_dict['fp16_scaler'] = fp16_scaler.state_dict()
+        utils.save_on_master(save_dict, os.path.join(args.output_dir, 'checkpoint.pth'))
+        if args.saveckp_freq and epoch % args.saveckp_freq == 0:
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f'checkpoint{epoch:04}.pth'))
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                     'epoch': epoch}
+        if utils.is_main_process():
+            with (Path(args.output_dir) / "log.txt").open("a") as f:
+                f.write(json.dumps(log_stats) + "\n")
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print('Training time {}'.format(total_time_str))
+
+
+def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loader,
+                    optimizer, lr_schedule, wd_schedule, momentum_schedule,epoch,
+                    fp16_scaler, args):
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
+    for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        # update weight decay and learning rate according to their schedule
+        it = len(data_loader) * epoch + it  # global training iteration
+        for i, param_group in enumerate(optimizer.param_groups):
+            param_group["lr"] = lr_schedule[it]
+            if i == 0:  # only the first group is regularized
+                param_group["weight_decay"] = wd_schedule[it]
+
+        # move images to gpu
+        images = [im.cuda(non_blocking=True) for im in images]
+        # teacher and student forward passes + compute dino loss
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
+            teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
+            student_output = student(images)
+            loss = dino_loss(student_output, teacher_output, epoch)
+
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()), force=True)
+            sys.exit(1)
+
+        # student update
+        optimizer.zero_grad()
+        param_norms = None
+        if fp16_scaler is None:
+            loss.backward()
+            if args.clip_grad:
+                param_norms = utils.clip_gradients(student, args.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, student,
+                                              args.freeze_last_layer)
+            optimizer.step()
+        else:
+            fp16_scaler.scale(loss).backward()
+            if args.clip_grad:
+                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
+                param_norms = utils.clip_gradients(student, args.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, student,
+                                              args.freeze_last_layer)
+            fp16_scaler.step(optimizer)
+            fp16_scaler.update()
+
+        # EMA update for the teacher
+        with torch.no_grad():
+            m = momentum_schedule[it]  # momentum parameter
+            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
+                param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(loss=loss.item())
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+
+def resume_training():
+    return 1
+    #raise NotImplementedError()
 
 def get_models(args):
-
+    utils.init_distributed_mode(args)
     if args.arch in vits.__dict__.keys():
+
         student = vits.__dict__[args.arch](
             patch_size=args.patch_size,
             drop_path_rate=args.drop_path_rate,  # stochastic depth
@@ -284,12 +382,13 @@ def get_models(args):
         p.requires_grad = False
     print(f"Student and Teacher are built: they are both {args.arch} network.")
 
-    return student,teacher
+    return student,teacher,teacher_without_ddp
 
 
 
-if __name__ == "__name__":
-    opt = parse_opt()
+if __name__ == "__main__":
+    args = parse_opt()    
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)    
     
-    #main(opt)
+    main(args)
 

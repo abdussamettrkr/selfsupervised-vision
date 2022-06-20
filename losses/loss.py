@@ -1,5 +1,6 @@
 import torch
-import torch.nn.funcional as F
+import torch.nn as nn
+from torch.nn import functional as F
 import torch.distributed as dist
 import numpy as np
 
