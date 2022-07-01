@@ -11,6 +11,7 @@ from dataset.augmentation import *
 import models.vit as vits
 from models.vit import DINOHead
 from losses.loss import DINOLoss
+from dataset.imageDataset import ImageDataset
 
 import time
 import math
@@ -22,7 +23,7 @@ import datetime
 
 
 
-
+"""
 def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loader,
                     optimizer, lr_schedule, wd_schedule, momentum_schedule,epoch,
                     fp16_scaler, args):
@@ -83,7 +84,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-
+"""
 
 
 def parse_opt():
@@ -160,11 +161,15 @@ def main(args):
         local_crops_number=args.local_crops_number,
         local_crops_scale=args.local_crops_scale)
     
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    dataset = ImageDataset(args.data_path,transform=transform)
+    
+    print('Data path: {}'.format(args.data_path))
+    print(next(enumerate(dataset)))
+
     #sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)    
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        #sampler=sampler,
+        #sampler=sampler
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -224,7 +229,7 @@ def main(args):
     start_time = time.time()
     for epoch in range(start_epoch,args.epochs):
         #data_loader.sampler.set_epoch(epoch)
-        # ============ training one epoch of DINO ... ============
+        # ============ training one epoch of DINO ... ============        
         train_stats = train_one_epoch(student, teacher, teacher_without_ddp, dino_loss,
             data_loader, optimizer, lr_schedule, wd_schedule, momentum_schedule,
             epoch, fp16_scaler, args)
@@ -259,6 +264,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
     for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
@@ -321,7 +327,7 @@ def resume_training():
     #raise NotImplementedError()
 
 def get_models(args):
-    utils.init_distributed_mode(args)
+    #utils.init_distributed_mode(args)
     if args.arch in vits.__dict__.keys():
 
         student = vits.__dict__[args.arch](
@@ -357,8 +363,7 @@ def get_models(args):
         embed_dim, 
         args.out_dim, 
         args.use_bn_in_head),
-    )
-
+    )    
     student, teacher = student.cuda(), teacher.cuda()
 
 
@@ -368,15 +373,15 @@ def get_models(args):
         teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
 
         # we need DDP wrapper to have synchro batch norms working...
-        teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
+        #teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
         teacher_without_ddp = teacher.module
     else:
         # teacher_without_ddp and teacher are the same thing
         teacher_without_ddp = teacher
 
-    student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
+    #student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
     # teacher and student start with the same weights
-    teacher_without_ddp.load_state_dict(student.module.state_dict())
+    teacher_without_ddp.load_state_dict(student.state_dict())
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
