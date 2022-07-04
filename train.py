@@ -12,6 +12,7 @@ import models.vit as vits
 from models.vit import DINOHead
 from losses.loss import DINOLoss
 from dataset.imageDataset import ImageDataset
+from torchvision.datasets import ImageFolder
 
 import time
 import math
@@ -19,6 +20,7 @@ import sys
 from pathlib import Path
 import json
 import datetime
+import numpy as np
 
 
 
@@ -118,7 +120,7 @@ def parse_opt():
     
     # Clipping with norm .3 ~ 1.0 canhelp optimization for larger ViT architectures. 0 for disabling.
     parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter gradient norm if using gradient clipping.""")
-    parser.add_argument('--batch_size_per_gpu', default=64, type=int, help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
+    parser.add_argument('--batch_size_per_gpu', default=8, type=int, help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
     parser.add_argument('--epochs', default=100, type=int, help='Number of epochs of training.')
 
     # Typically doing so during the first epoch helps training. Try increasing this value if the loss does not decrease.
@@ -163,8 +165,6 @@ def main(args):
     
     dataset = ImageDataset(args.data_path,transform=transform)
     
-    print('Data path: {}'.format(args.data_path))
-    print(next(enumerate(dataset)))
 
     #sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)    
     data_loader = torch.utils.data.DataLoader(
@@ -225,7 +225,6 @@ def main(args):
     start_epoch = resume_training()
 
 
-
     start_time = time.time()
     for epoch in range(start_epoch,args.epochs):
         #data_loader.sampler.set_epoch(epoch)
@@ -263,7 +262,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                     fp16_scaler, args):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    for it, (images) in enumerate(metric_logger.log_every(data_loader, 10, header=header)):
         
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration

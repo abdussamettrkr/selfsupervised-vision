@@ -15,12 +15,9 @@ class ImageDataset(torch.utils.data.Dataset):
 
     def __getitem__(self,idx):
         image_path = os.path.join(self.image_dir,self.image_names[idx])
-        img = np.asarray(Image.open(image_path), dtype=np.float32) / 255.0        
-        img = torch.from_numpy(img)
-    
+        img = Image.open(image_path)        
         if self.transform is not None:
             img = self.transform(img)
-        
     
 
         return img
