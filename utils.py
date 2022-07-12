@@ -104,6 +104,19 @@ def has_batchnorms(model):
             return True
     return False
 
+def save_on_master(*args, **kwargs):
+    if is_main_process():
+        torch.save(*args, **kwargs)
+
+def is_main_process():
+    return get_rank() == 0
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
 
 
 def is_dist_avail_and_initialized():
@@ -265,6 +278,25 @@ class SmoothedValue(object):
             global_avg=self.global_avg,
             max=self.max,
             value=self.value)
+                
+def clip_gradients(model, clip):
+    norms = []
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            norms.append(param_norm.item())
+            clip_coef = clip / (param_norm + 1e-6)
+            if clip_coef < 1:
+                p.grad.data.mul_(clip_coef)
+    return norms
+
+
+def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
+    if epoch >= freeze_last_layer:
+        return
+    for n, p in model.named_parameters():
+        if "last_layer" in n:
+            p.grad = None
 
 
 ##???? goz at
@@ -289,18 +321,18 @@ def init_distributed_mode(args):
         print('Does not support training without GPU.')
         sys.exit(1)
 
-    dist.init_process_group(
-        backend="nccl",
-        init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank,
-    )
+    # dist.init_process_group(
+    #     backend="nccl",
+    #     init_method=args.dist_url,
+    #     world_size=args.world_size,
+    #     rank=args.rank,
+    # )
 
     torch.cuda.set_device(args.gpu)
-    print('| distributed init (rank {}): {}'.format(
-        args.rank, args.dist_url), flush=True)
-    dist.barrier()
-    setup_for_distributed(args.rank == 0)
+    # print('| distributed init (rank {}): {}'.format(
+        # args.rank, args.dist_url), flush=True)
+    #dist.barrier()
+    #setup_for_distributed(args.rank == 0)
 
 
 def setup_for_distributed(is_master):

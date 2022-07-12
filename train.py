@@ -8,8 +8,8 @@ from torchvision import models as torchvision_models
 
 import utils 
 from dataset.augmentation import *
-import models.vit as vits
-from models.vit import DINOHead
+import models.vit.vit as vits
+from models.vit.vit import DINOHead
 from losses.loss import DINOLoss
 from dataset.imageDataset import ImageDataset
 from torchvision.datasets import ImageFolder
@@ -127,7 +127,7 @@ def parse_opt():
     parser.add_argument('--freeze_last_layer', default=1, type=int, help="""Number of epochs during which we keep the output layer fixed.""")
 
     # The learning rate is linearly scaled with the batch size, and specified here for a reference batch size of 256.
-    parser.add_argument("--lr", default=0.0005, type=float, help="""Learning rate at the end of linear warmup (highest LR used during training).""")
+    parser.add_argument("--lr", default=0.00005, type=float, help="""Learning rate at the end of linear warmup (highest LR used during training).""")
     
     parser.add_argument("--warmup_epochs", default=10, type=int, help="Number of epochs for the linear learning-rate warm up.")
     parser.add_argument('--min_lr', type=float, default=1e-6, help="""Target LR at the end of optimization. We use a cosine LR schedule with linear warmup.""")
@@ -306,7 +306,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         # EMA update for the teacher
         with torch.no_grad():
             m = momentum_schedule[it]  # momentum parameter
-            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
+            for param_q, param_k in zip(student.parameters(), teacher_without_ddp.parameters()):
                 param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
@@ -326,6 +326,8 @@ def resume_training():
     #raise NotImplementedError()
 
 def get_models(args):
+    student = None
+    embed_dim = None
     #utils.init_distributed_mode(args)
     if args.arch in vits.__dict__.keys():
 
