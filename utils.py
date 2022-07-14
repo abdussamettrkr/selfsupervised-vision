@@ -1,15 +1,36 @@
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-import os
-import subprocess
-import time, datetime
-import math
-import warnings
+from torchvision import models as torchvision_models
+import numpy as np
+
+import os,subprocess,time, datetime, math, warnings, logging
 from collections import defaultdict, deque
 
 
-import numpy as np
+import models.vit.vit as vits
+from models.vit.vit import DINOHead
+
+
+
+
+class Logger(object):
+    def __init__(self, log_file_name, log_level, logger_name):
+        self.__logger = logging.getLogger(logger_name)
+        self.__logger.setLevel(log_level)
+        file_handler = logging.FileHandler(log_file_name)
+        console_handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "[%(asctime)s] - [%(filename)s line:%(lineno)3d] : %(message)s"
+        )
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        self.__logger.addHandler(file_handler)
+        self.__logger.addHandler(console_handler)
+
+    def get_log(self):
+        return self.__logger
+
 
 def set_random_seeds(seed=31):
     """
@@ -22,7 +43,6 @@ def set_random_seeds(seed=31):
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
     # type: (Tensor, float, float, float, float) -> Tensor
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
-
 
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
@@ -116,7 +136,6 @@ def get_rank():
     if not is_dist_avail_and_initialized():
         return 0
     return dist.get_rank()
-
 
 
 def is_dist_avail_and_initialized():
@@ -299,7 +318,6 @@ def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
             p.grad = None
 
 
-##???? goz at
 def init_distributed_mode(args):
     # launched with torch.distributed.launch
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -329,10 +347,6 @@ def init_distributed_mode(args):
     # )
 
     torch.cuda.set_device(args.gpu)
-    # print('| distributed init (rank {}): {}'.format(
-        # args.rank, args.dist_url), flush=True)
-    #dist.barrier()
-    #setup_for_distributed(args.rank == 0)
 
 
 def setup_for_distributed(is_master):
@@ -350,7 +364,6 @@ def setup_for_distributed(is_master):
     __builtin__.print = print
 
 
-
 def get_params_groups(model):
     regularized = []
     not_regularized = []
@@ -363,7 +376,6 @@ def get_params_groups(model):
         else:
             regularized.append(param)
     return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
-
 
 
 def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
@@ -381,11 +393,86 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
 
 
 
-def get_world_size():
-    if not is_dist_avail_and_initialized():
-        return 1
-    return dist.get_world_size()
 
-if __name__ == '__main__':
-    pass
+def get_models(args):
+    student = None
+    embed_dim = None
+    #utils.init_distributed_mode(args)
+    if args.arch in vits.__dict__.keys():
 
+        student = vits.__dict__[args.arch](
+            patch_size=args.patch_size,
+            drop_path_rate=args.drop_path_rate,  # stochastic depth
+        )
+        teacher = vits.__dict__[args.arch](patch_size=args.patch_size)
+        embed_dim = student.embed_dim
+    # if the network is a XCiT
+    elif args.arch in torch.hub.list("facebookresearch/xcit:main"):
+        student = torch.hub.load('facebookresearch/xcit:main', args.arch,
+                                 pretrained=False, drop_path_rate=args.drop_path_rate)
+        teacher = torch.hub.load('facebookresearch/xcit:main', args.arch, pretrained=False)
+        embed_dim = student.embed_dim
+    # otherwise, we check if the architecture is in torchvision models
+    elif args.arch in torchvision_models.__dict__.keys():
+        student = torchvision_models.__dict__[args.arch]()
+        teacher = torchvision_models.__dict__[args.arch]()
+        embed_dim = student.fc.weight.shape[1]
+    else:
+        print(f"Unknow architecture: {args.arch}")
+
+
+    # multi-crop wrapper handles forward with inputs of different resolutions
+    student = MultiCropWrapper(student, DINOHead(
+        embed_dim,
+        args.out_dim,
+        use_bn=args.use_bn_in_head,
+        norm_last_layer=args.norm_last_layer,
+    ))
+
+    teacher = MultiCropWrapper(teacher, DINOHead(
+        embed_dim, 
+        args.out_dim, 
+        args.use_bn_in_head),
+    )    
+    student, teacher = student.cuda(), teacher.cuda()
+
+
+    # synchronize batch norms (if any)
+    if has_batchnorms(student):
+        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
+        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
+
+        # we need DDP wrapper to have synchro batch norms working...
+        #teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
+        teacher_without_ddp = teacher.module
+    else:
+        # teacher_without_ddp and teacher are the same thing
+        teacher_without_ddp = teacher
+
+    #student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
+    # teacher and student start with the same weights
+    teacher_without_ddp.load_state_dict(student.state_dict())
+    # there is no backpropagation through the teacher, so no need for gradients
+    for p in teacher.parameters():
+        p.requires_grad = False
+    print(f"Student and Teacher are built: they are both {args.arch} network.")
+
+    return student,teacher,teacher_without_ddp
+
+def load_checkpoint(path, student,teacher, optimizer=None):
+    if os.path.isfile(path):
+        logging.info("=== loading checkpoint '{}' ===".format(path))
+
+        checkpoint = torch.load(path)
+        student.load_state_dict(checkpoint["student"], strict=False)
+        teacher.load_state_dict(checkpoint["teacher"], strict=False)
+
+        if optimizer is not None:
+            best_loss = checkpoint["best_prec"]
+            last_epoch = checkpoint["last_epoch"]
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            logging.info(
+                "=== done. also loaded optimizer from "
+                + "checkpoint '{}' (epoch {}) ===".format(path, last_epoch + 1)
+            )
+            return best_loss, last_epoch
