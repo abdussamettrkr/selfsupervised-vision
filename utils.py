@@ -8,10 +8,6 @@ import os,subprocess,time, datetime, math, warnings, logging
 from collections import defaultdict, deque
 
 
-import models.vit.vit as vits
-from models.vit.vit import DINOHead
-
-
 
 
 class Logger(object):
@@ -385,6 +381,7 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
+    print(type(base_value),type(final_value))
     schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
 
     schedule = np.concatenate((warmup_schedule, schedule))
@@ -394,70 +391,6 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
 
 
 
-def get_models(args):
-    student = None
-    embed_dim = None
-    #utils.init_distributed_mode(args)
-    if args.arch in vits.__dict__.keys():
-
-        student = vits.__dict__[args.arch](
-            patch_size=args.patch_size,
-            drop_path_rate=args.drop_path_rate,  # stochastic depth
-        )
-        teacher = vits.__dict__[args.arch](patch_size=args.patch_size)
-        embed_dim = student.embed_dim
-    # if the network is a XCiT
-    elif args.arch in torch.hub.list("facebookresearch/xcit:main"):
-        student = torch.hub.load('facebookresearch/xcit:main', args.arch,
-                                 pretrained=False, drop_path_rate=args.drop_path_rate)
-        teacher = torch.hub.load('facebookresearch/xcit:main', args.arch, pretrained=False)
-        embed_dim = student.embed_dim
-    # otherwise, we check if the architecture is in torchvision models
-    elif args.arch in torchvision_models.__dict__.keys():
-        student = torchvision_models.__dict__[args.arch]()
-        teacher = torchvision_models.__dict__[args.arch]()
-        embed_dim = student.fc.weight.shape[1]
-    else:
-        print(f"Unknow architecture: {args.arch}")
-
-
-    # multi-crop wrapper handles forward with inputs of different resolutions
-    student = MultiCropWrapper(student, DINOHead(
-        embed_dim,
-        args.out_dim,
-        use_bn=args.use_bn_in_head,
-        norm_last_layer=args.norm_last_layer,
-    ))
-
-    teacher = MultiCropWrapper(teacher, DINOHead(
-        embed_dim, 
-        args.out_dim, 
-        args.use_bn_in_head),
-    )    
-    student, teacher = student.cuda(), teacher.cuda()
-
-
-    # synchronize batch norms (if any)
-    if has_batchnorms(student):
-        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
-
-        # we need DDP wrapper to have synchro batch norms working...
-        #teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
-        teacher_without_ddp = teacher.module
-    else:
-        # teacher_without_ddp and teacher are the same thing
-        teacher_without_ddp = teacher
-
-    #student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
-    # teacher and student start with the same weights
-    teacher_without_ddp.load_state_dict(student.state_dict())
-    # there is no backpropagation through the teacher, so no need for gradients
-    for p in teacher.parameters():
-        p.requires_grad = False
-    print(f"Student and Teacher are built: they are both {args.arch} network.")
-
-    return student,teacher,teacher_without_ddp
 
 def load_checkpoint(path, student,teacher, optimizer=None):
     if os.path.isfile(path):

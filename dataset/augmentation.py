@@ -2,6 +2,7 @@ from torchvision import datasets, transforms
 import random
 
 from PIL import Image,ImageOps,ImageFilter
+import numpy as np
 
 class DataAugmentationDINO(object):
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
@@ -16,8 +17,7 @@ class DataAugmentationDINO(object):
         normalize = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ])
-
+        ])        
         # first global crop
         self.global_transfo1 = transforms.Compose([
             transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),

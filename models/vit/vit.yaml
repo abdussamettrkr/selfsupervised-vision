@@ -6,21 +6,21 @@ momentum_teacher: 0.996 #Base EMA paramater used for teacher parameter uptade. T
 use_bn_in_head: False #Wheter or not use batch normilization in projection head. Default False
 warmup_teacher_temp: 0.04 #Final value (after linear warmup)of the teacher temperature.
 warmup_teacher_temp_epochs: 30 #Number of warmup epochs for the teacher temperature (Default: 30).
+teacher_temp: 0.04 #Initial value for the teacher temperature
 use_fp16: True
 weight_decay: 0.04 #Initial value of the weight decay.
 weight_decay_end: 0.4 
 clip_grad: 3.0
-batch_size_per_gpu: 8
 epochs: 100
 freeze_last_layer: 1 #Number of epochs during which we keep the output layer fixed.
 lr: 0.0005
 warmup_epochs: 10
-min_lr: 1e-6
+min_lr: 0.000001
 optimizer: 'adamw'
 drop_path_rate: 0.1 #stochastic depth rate
-global_crops_scale: (0.4,1.) #Scale range of the cropped image before resizing, relatively to the origin image. Used for large global view cropping.
+global_crops_scale: [0.4,1.] #Scale range of the cropped image before resizing, relatively to the origin image. Used for large global view cropping.
 local_crops_number: 8
-local_crops_scale: (0.05,0.4)
+local_crops_scale: [0.05,0.4]
 data_path: "/path/to/imagenet/train"
 output_dir: "."
 saveckp_freq: 20
