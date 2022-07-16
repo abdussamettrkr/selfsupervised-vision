@@ -32,6 +32,7 @@ parser.add_argument("--batch-size",required=True,type=int)
 parser.add_argument("--num-workers",default=4   ,type=int)
 parser.add_argument("--work-path",default = os.path.dirname(os.path.abspath(__file__)),type=str)
 parser.add_argument("--resume", action="store_true", help="resume from checkpoint")
+parser.add_argument("--save-freq", default=5, type=int)
 parser.add_argument("--config-file",required=True,type=str)
 
 args = parser.parse_args()
@@ -59,10 +60,7 @@ def train(train_loader, nets: list, criterion,
     student.train()
 
 
-
-    train_loss = 0
-    correct = 0
-    total = 0
+    
     end = time.time()
 
     logger.info(" === Epoch: [{}/{}] === ".format(epoch + 1,args.epochs))
@@ -101,14 +99,15 @@ def train(train_loader, nets: list, criterion,
             fp16_scaler.update()
 
 
-        ##Update teacher weights with respect to EMA
+        ##Update teacher weights with EMA
         with torch.no_grad():
             m = momentum_sch[it]  # momentum parameter
             for param_q, param_k in zip(student.parameters(), teacher.parameters()):
                 param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
-
         pbar.set_postfix({'loss':loss.item(),'model':model_time,'data':data_time})
         end = time.time() 
+
+
 
     
 
