@@ -19,6 +19,7 @@ Simply run the cmd for the training:
 python train_.py --data-path /data/bird_dataset --epochs 100 --batch-size 48 --config-file ./models/model_name/model_name.yaml
 ```
 
+
 We use yaml files to keep track of model details.
 
 
