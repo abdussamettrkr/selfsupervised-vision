@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from torchvision import models as torchvision_models
 import numpy as np
+import shutil
 
 import os,subprocess,time, datetime, math, warnings, logging
 from collections import defaultdict, deque
@@ -390,8 +391,6 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
 
 
 
-
-
 def load_checkpoint(path, student,teacher, optimizer=None):
     if os.path.isfile(path):
         logging.info("=== loading checkpoint '{}' ===".format(path))
@@ -401,7 +400,7 @@ def load_checkpoint(path, student,teacher, optimizer=None):
         teacher.load_state_dict(checkpoint["teacher"], strict=False)
 
         if optimizer is not None:
-            best_loss = checkpoint["best_prec"]
+            best_loss = checkpoint["best_loss"]
             last_epoch = checkpoint["last_epoch"]
             optimizer.load_state_dict(checkpoint["optimizer"])
             logging.info(
@@ -409,3 +408,8 @@ def load_checkpoint(path, student,teacher, optimizer=None):
                 + "checkpoint '{}' (epoch {}) ===".format(path, last_epoch + 1)
             )
             return best_loss, last_epoch
+
+
+
+def save_checkpoint(state,filename):
+    torch.save(state, filename + ".pth.tar")    
