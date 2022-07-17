@@ -13,7 +13,7 @@ weight_decay_end: 0.4
 clip_grad: 3.0
 epochs: 100
 freeze_last_layer: 1 #Number of epochs during which we keep the output layer fixed.
-lr: 0.0005
+lr: 0.00001
 warmup_epochs: 10
 min_lr: 0.000001
 optimizer: 'adamw'

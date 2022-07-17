@@ -22,7 +22,8 @@ class ImageDataset(torch.utils.data.Dataset):
 
     def __getitem__(self,idx):
         image_path = self.image_names[idx]
-        img = Image.open(image_path)        
+        img = Image.open(image_path)
+        img = img.convert('RGB')   
         if self.transform is not None:
             img = self.transform(img)
     

@@ -29,7 +29,7 @@ parser.add_argument("--exp-name", required=True, type=str, help="Experiment name
 parser.add_argument("--data-path", required=True, type=str, help="Root path of image datasets")
 parser.add_argument("--epochs",required=True,type=int)
 parser.add_argument("--batch-size",required=True,type=int)
-parser.add_argument("--num-workers",default=4   ,type=int)
+parser.add_argument("--num-workers",default=4,type=int)
 parser.add_argument("--work-path",default = os.path.dirname(os.path.abspath(__file__)),type=str)
 parser.add_argument("--resume", action="store_true", help="resume from checkpoint")
 parser.add_argument("--save-freq", default=5, type=int)
@@ -101,19 +101,28 @@ def train(train_loader, nets: list, criterion,
                                               model_config['freeze_last_layer'])
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
+
         
-        tb.add_scalar('loss',loss.item())
-
-        loss_current += loss.item()
-
-
         ##Update teacher weights with EMA
         with torch.no_grad():
             m = momentum_sch[it]  # momentum parameter
             for param_q, param_k in zip(student.parameters(), teacher.parameters()):
                 param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
-        pbar.set_postfix({'lr':lr_sch[it],'loss':loss.item(),'model':model_time,'data':data_time})
+
+        
+        tb.add_scalar('loss',loss.item(),it)
+        tb.add_scalar('lr',lr_sch[it],it)
+        tb.add_scalar('data_loadtime',data_time,it)
+        tb.add_scalar('model_time',model_time,it)
+
         end = time.time() 
+
+        loss_current += loss.item()
+
+
+        
+        pbar.set_postfix({'lr':lr_sch[it],'loss':loss.item(),'model':model_time,'data':data_time})
+        
     loss_current /= len(train_loader)    
 
 

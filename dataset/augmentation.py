@@ -20,7 +20,7 @@ class DataAugmentationDINO(object):
         ])        
         # first global crop
         self.global_transfo1 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=transforms.InterpolationMode.BICUBIC),
             flip_and_color_jitter,
             GaussianBlur(1.0),
             normalize,
@@ -28,7 +28,7 @@ class DataAugmentationDINO(object):
 
         # second global crop
         self.global_transfo2 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=transforms.InterpolationMode.BICUBIC),
             flip_and_color_jitter,
             GaussianBlur(0.1),
             Solarization(0.2),
@@ -38,14 +38,14 @@ class DataAugmentationDINO(object):
         # transformation for the local small crops
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose([
-            transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=transforms.InterpolationMode.BICUBIC),
             flip_and_color_jitter,
             GaussianBlur(p=0.5),
             normalize,
         ])
 
     def __call__(self, image):
-        crops = []
+        crops = []        
         crops.append(self.global_transfo1(image))        
         crops.append(self.global_transfo2(image))
         for _ in range(self.local_crops_number):

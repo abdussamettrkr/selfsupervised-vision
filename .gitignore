@@ -2,4 +2,4 @@
 *.swp
 *.pkl
 *.pth
-experiments
+*experiments*
