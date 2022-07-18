@@ -119,8 +119,6 @@ def train(train_loader, nets: list, criterion,
 
         loss_current += loss.item()
 
-
-        
         pbar.set_postfix({'lr':lr_sch[it],'loss':loss.item(),'model':model_time,'data':data_time})
         
     loss_current /= len(train_loader)    
@@ -135,8 +133,9 @@ def main():
         model_config = yaml.safe_load(stream)
 
     #Copy model config to experiments
-    dest_config_path = os.path.join(experiment_dir_path,args.config_file.split('/')[-1])
-    shutil.copyfile(args.config_file,dest_config_path)
+    if not args.resume:
+        dest_config_path = os.path.join(experiment_dir_path,args.config_file.split('/')[-1])
+        shutil.copyfile(args.config_file,dest_config_path)
     
     utils.set_random_seeds(41)
     
@@ -149,10 +148,11 @@ def main():
 
     dataset = ImageDataset(args.data_path,transform=transform)
     data_loader = torch.utils.data.DataLoader(
-        dataset,     
+        dataset,             
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=True,
+        shuffle=True,
         drop_last=True
     )
 
@@ -185,16 +185,18 @@ def main():
 
     
         # ============ init schedulers ... ============
+
+    
     lr_schedule = utils.cosine_scheduler(
         model_config['lr'] * args.batch_size / 256.,  # linear scaling rule
         model_config['min_lr'],
-        model_config['epochs'], len(dataset),
+        model_config['epochs'], len(data_loader),
         warmup_epochs=model_config['warmup_epochs'],
     )
     wd_schedule = utils.cosine_scheduler(
         model_config['weight_decay'],
         model_config['weight_decay_end'],
-        model_config['epochs'], len(dataset),
+        model_config['epochs'], len(data_loader),
     )
     # momentum parameter is increased to 1. during training with a cosine schedule
     momentum_schedule = utils.cosine_scheduler(model_config['momentum_teacher'], 1,
@@ -246,7 +248,6 @@ def get_models(config):
     embed_dim = None
     #utils.init_distributed_mode(args)
     if config['arch'] in vits.__dict__.keys():
-
         student = vits.__dict__[config['arch']](
             patch_size=config['patch_size'],
             drop_path_rate=config['drop_path_rate'],  # stochastic depth

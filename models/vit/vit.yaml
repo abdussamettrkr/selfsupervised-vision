@@ -11,9 +11,9 @@ use_fp16: True
 weight_decay: 0.04 #Initial value of the weight decay.
 weight_decay_end: 0.4 
 clip_grad: 3.0
-epochs: 100
+epochs: 1000
 freeze_last_layer: 1 #Number of epochs during which we keep the output layer fixed.
-lr: 0.00001
+lr: 0.0005
 warmup_epochs: 10
 min_lr: 0.000001
 optimizer: 'adamw'

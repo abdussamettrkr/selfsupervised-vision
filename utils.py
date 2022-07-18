@@ -176,6 +176,19 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     return schedule
 
 
+def cosine_annealing(base_value, final_value, epochs, niter_per_ep,restart_epoch=20,gama=0.5, warmup_epochs=5, start_warmup_value=0):
+    schedule = []
+    for idx,item in enumerate(range(restart_epoch,epochs+1,restart_epoch)):
+        cosine_sch = cosine_scheduler(base_value*pow(gama,idx),
+                        final_value,restart_epoch,
+                        niter_per_ep,warmup_epochs,
+                        start_warmup_value)
+    
+        np.concatenate(schedule,cosine_sch)
+    return schedule
+
+
+
 
 def load_checkpoint(path, student,teacher, optimizer=None):
     if os.path.isfile(path):
