@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 from torchvision import models as torchvision_models
 import numpy as np
 import shutil
@@ -104,14 +103,12 @@ class MultiCropWrapper(nn.Module):
         start_idx, output = 0, torch.empty(0).to(x[0].device)
         for end_idx in idx_crops:
             _out = self.backbone(torch.cat(x[start_idx: end_idx]))
-            # The output is a tuple with XCiT model. See:
-            # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
             if isinstance(_out, tuple):
                 _out = _out[0]
             # accumulate outputs
             output = torch.cat((output, _out))
             start_idx = end_idx
-        # Run the head forward on the concatenated features.
+        # Run the head forward on the concatenated features.        
         return self.head(output)
 
 def has_batchnorms(model):

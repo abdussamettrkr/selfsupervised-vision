@@ -1,24 +1,18 @@
-from pickletools import optimize
-from turtle import st
 import torch
 import torch.nn as nn
-from torchvision import datasets,transforms
-from torchvision import models as torchvision_models
-from torchvision.datasets import ImageFolder
 from torch.utils.tensorboard import SummaryWriter
 
 
 import models.vit.vit as vits
-from models.vit.vit import DINOHead
+import models.resnet.resnet as resnets
+from models.base import DINOHead
 from losses.loss import DINOLoss
 from dataset.imageDataset import ImageDataset
 from dataset.augmentation import *
 
 
-from pathlib import Path
-import numpy as np
 from tqdm import tqdm
-import time, math, sys, json, argparse, os, datetime, logging, yaml
+import time, math, argparse, os, logging, yaml
 from utils import Logger
 import utils 
 import shutil
@@ -245,8 +239,7 @@ def main():
 
 def get_models(config):
     student = None
-    embed_dim = None
-    #utils.init_distributed_mode(args)
+    embed_dim = None    
     if config['arch'] in vits.__dict__.keys():
         student = vits.__dict__[config['arch']](
             patch_size=config['patch_size'],
@@ -255,19 +248,14 @@ def get_models(config):
         teacher = vits.__dict__[config['arch']](patch_size=config['patch_size'])
         embed_dim = student.embed_dim
     # if the network is a XCiT
-    elif config['arch'] in torch.hub.list("facebookresearch/xcit:main"):
-        student = torch.hub.load('facebookresearch/xcit:main', config['arch'],
-                                 pretrained=False, drop_path_rate=config['drop_path_rate'])
-        teacher = torch.hub.load('facebookresearch/xcit:main', config['arch'], pretrained=False)
-        embed_dim = student.embed_dim
-    # otherwise, we check if the architecture is in torchvision models
-    elif config['arch'] in torchvision_models.__dict__.keys():
-        student = torchvision_models.__dict__[config['arch']]()
-        teacher = torchvision_models.__dict__[config['arch']]()
+    elif config['arch'] in resnets.__dict__.keys():
+        student = resnets.__dict__[config['arch']]()
+        teacher = resnets.__dict__[config['arch']]()
         embed_dim = student.fc.weight.shape[1]
     else:
         print(f"Unknow architecture: {config['arch']}")
 
+    print('embed_dim',embed_dim)
 
     # multi-crop wrapper handles forward with inputs of different resolutions
     student = utils.MultiCropWrapper(student, DINOHead(
@@ -283,12 +271,6 @@ def get_models(config):
         use_bn=config['use_bn_in_head']),
     )    
     student, teacher = student.cuda(), teacher.cuda()
-
-
-    # synchronize batch norms (if any)
-    if utils.has_batchnorms(student):
-        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
 
     # teacher and student start with the same weights
     teacher.load_state_dict(student.state_dict())
