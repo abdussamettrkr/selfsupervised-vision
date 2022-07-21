@@ -14,6 +14,7 @@ from dataset.augmentation import *
 from tqdm import tqdm
 import time, math, argparse, os, logging, yaml
 from utils import Logger
+import numpy as np
 import utils 
 import shutil
 
@@ -120,6 +121,44 @@ def train(train_loader, nets: list, criterion,
 
     return loss_current
 
+    transform = DataAugmentationDINO(
+        global_crops_scale=global_crops_scale,
+        local_crops_number=local_crops_number,
+        local_crops_scale=local_crops_scale,
+        dontNormilize=True)
+    
+
+    dataset = ImageDataset(args.data_path,transform=transform)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,    
+        batch_size=batch_size
+    )
+
+    images = next(enumerate(data_loader))[1]
+    
+
+
+    sample_imgs_filename = "sample_images"
+    sample_imgs_path = os.path.join(experiment_dir_path,sample_imgs_filename)
+
+    if not os.path.exists(sample_imgs_path):
+        os.mkdir(sample_imgs_path)
+
+
+    for idx,imgs in enumerate(images):
+        imgs = imgs[:num_batch2save]
+        for batch_idx,img in enumerate(imgs):
+            if idx < 2: #Global image
+                img_path = os.path.join(sample_imgs_path,'batch{}_global{}.png'.format(batch_idx,idx))
+            else:
+                img_path = os.path.join(sample_imgs_path,'batch{}_local{}.png'.format(batch_idx,idx))
+            
+            utils.save_img(img,img_path)            
+        
+    
+    
+    
+
 
 
 def main():    
@@ -209,6 +248,16 @@ def main():
 
 
     logger.info("            =======  Training  =======\n")
+
+    #Save sample images
+    save_batch_imgs(
+        global_crops_scale=model_config['global_crops_scale'],
+        local_crops_number=model_config['local_crops_number'],
+        local_crops_scale=model_config['local_crops_scale'],
+        batch_size=args.batch_size
+    )
+
+
     for epoch in range(last_epoch + 1, args.epochs):
         loss = train(data_loader,[student,teacher],dino_loss,optimizer,epoch,
                 [lr_schedule,wd_schedule,momentum_schedule],model_config,fp16_scaler)

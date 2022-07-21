@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision import models as torchvision_models
+import torchvision.transforms as T
 import numpy as np
 import shutil
 
@@ -205,6 +206,12 @@ def load_checkpoint(path, student,teacher, optimizer=None):
             )
             return best_loss, last_epoch
 
+def save_img(img_tensor,target_path):
+    transform = T.ToPILImage()
+    
+    
+    img = transform(img_tensor)
+    img.save(target_path)
 
 
 def save_checkpoint(state,filename):
