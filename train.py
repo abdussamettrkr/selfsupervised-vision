@@ -121,6 +121,7 @@ def train(train_loader, nets: list, criterion,
 
     return loss_current
 
+def save_batch_imgs(global_crops_scale,local_crops_number,local_crops_scale,batch_size, num_batch2save=3):    
     transform = DataAugmentationDINO(
         global_crops_scale=global_crops_scale,
         local_crops_number=local_crops_number,
