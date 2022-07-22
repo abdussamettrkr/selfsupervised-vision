@@ -19,7 +19,7 @@ import utils
 import shutil
 
 
-parser = argparse.ArgumentParser('DINO', add_help=False)
+parser = argparse.ArgumentParser('DINO training', add_help=True)
 parser.add_argument("--exp-name", required=True, type=str, help="Experiment name")
 parser.add_argument("--data-path", required=True, type=str, help="Root path of image datasets")
 parser.add_argument("--epochs",required=True,type=int)
@@ -218,11 +218,9 @@ def main():
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     
-        # ============ init schedulers ... ============
-
     
     lr_schedule = utils.cosine_scheduler(
-        model_config['lr'] * args.batch_size / 256.,  # linear scaling rule
+        model_config['lr'] * args.batch_size / 256., 
         model_config['min_lr'],
         model_config['epochs'], len(data_loader),
         warmup_epochs=model_config['warmup_epochs'],
@@ -232,7 +230,6 @@ def main():
         model_config['weight_decay_end'],
         model_config['epochs'], len(data_loader),
     )
-    # momentum parameter is increased to 1. during training with a cosine schedule
     momentum_schedule = utils.cosine_scheduler(model_config['momentum_teacher'], 1,
                                                args.epochs, len(data_loader))
     logger.info(f"== Loss, optimizer and schedulers ready.")
