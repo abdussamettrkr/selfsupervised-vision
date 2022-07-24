@@ -10,7 +10,7 @@ norm_last_layer: True #Whether or not normilize the last layer of DINO head. Inc
 weight_decay: 0.04 #Initial value of the weight decay.
 weight_decay_end: 0.4 
 clip_grad: 3.0
-epochs: 1000
+epochs: 300
 freeze_last_layer: 1 #Number of epochs during which we keep the output layer fixed.
 lr: 0.0005
 warmup_epochs: 10

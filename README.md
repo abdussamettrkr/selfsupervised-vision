@@ -3,7 +3,8 @@
 
 ## Existing Architectures
 
- - **(vit) [An Image is Worth 16x16 Words](https://arxiv.org/abs/2010.11929)
+ - (vit) [An Image is Worth 16x16 Words](https://arxiv.org/abs/2010.11929)
+ - (Resnet) Resnet18-34-50
 
 ## Requirements
 

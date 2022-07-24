@@ -201,7 +201,7 @@ def main():
         model_config['warmup_teacher_temp'],
         model_config['teacher_temp'],
         model_config['warmup_teacher_temp_epochs'],
-        model_config['epochs'],
+        args.epochs,
     ).cuda()
 
     params_groups = utils.get_params_groups(student)
@@ -222,13 +222,13 @@ def main():
     lr_schedule = utils.cosine_scheduler(
         model_config['lr'] * args.batch_size / 256., 
         model_config['min_lr'],
-        model_config['epochs'], len(data_loader),
+        args.epochs, len(data_loader),
         warmup_epochs=model_config['warmup_epochs'],
     )
     wd_schedule = utils.cosine_scheduler(
         model_config['weight_decay'],
         model_config['weight_decay_end'],
-        model_config['epochs'], len(data_loader),
+        args.epochs, len(data_loader),
     )
     momentum_schedule = utils.cosine_scheduler(model_config['momentum_teacher'], 1,
                                                args.epochs, len(data_loader))

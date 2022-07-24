@@ -15,7 +15,7 @@ import utils
 
 from tqdm import tqdm
 
-import argparse, os, yaml
+import argparse, os, yaml, math
 
 parser = argparse.ArgumentParser('DINO evaluation', add_help=True)
 parser.add_argument("--exp-name", required=True, type=str, help="Experiment name")
@@ -26,13 +26,26 @@ parser.add_argument("--work-path",default = os.path.dirname(os.path.abspath(__fi
 parser.add_argument("--config-file",required=True,type=str)
 args = parser.parse_args()
 
+experiment_dir_path = os.path.join(args.work_path,"experiments",args.exp_name)
 
 def run_knn():
     with open(args.config_file) as stream:
         model_config = yaml.safe_load(stream)
 
     student,teacher = get_models(model_config)
-    #student = student.backbone
+
+    # resume from a checkpoint
+    last_epoch = -1
+    best_loss = math.inf
+
+    ckpt_file = os.path.join(experiment_dir_path,'best.pth.tar')
+    if os.path.exists(ckpt_file):
+        utils.load_checkpoint(ckpt_file,student,teacher)
+    else:
+        print("File:{} does not exists. Please check experiment name.".format(ckpt_file))
+        exit(1)
+
+    student = student.backbone
     student.eval()
     teacher.eval()    
 
@@ -60,8 +73,7 @@ def run_knn():
         teacher_train_outs.append(t_out)
         train_y.append(labels)
 
-        if it == 50:
-            break
+
 
         
     for it, (images,labels) in enumerate(pbar :=tqdm(val_loader)):
@@ -76,8 +88,6 @@ def run_knn():
 
         val_y.append(labels)
 
-        if it == 50:
-            break
 
     estimator_student = KNeighborsClassifier()
     estimator_teacher = KNeighborsClassifier()
