@@ -2,7 +2,7 @@ import sklearn
 import torch
 from torchvision import transforms as T
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score,confusion_matrix
 from sklearn.neighbors import KNeighborsClassifier
 
 import models.vit.vit as vits
@@ -14,6 +14,8 @@ from dataset.imageDataset import ImageDataset
 import utils 
 
 from tqdm import tqdm
+import numpy as np
+rng = np.random.default_rng(2021)
 
 import argparse, os, yaml, math
 
@@ -23,10 +25,14 @@ parser.add_argument("--train-path", required=True, type=str, help="Root path of 
 parser.add_argument("--val-path", required=True, type=str, help="Root path of validation image datasets")
 parser.add_argument("--num-workers",default=4,type=int)
 parser.add_argument("--work-path",default = os.path.dirname(os.path.abspath(__file__)),type=str)
+parser.add_argument("--train-percent",default=1.0,type=float)
+parser.add_argument("--model",default="student",choices=['student','teacher'],type=str)
 parser.add_argument("--config-file",required=True,type=str)
 args = parser.parse_args()
 
 experiment_dir_path = os.path.join(args.work_path,"experiments",args.exp_name)
+
+np.random.seed(42)
 
 def run_knn():
     with open(args.config_file) as stream:
@@ -38,40 +44,58 @@ def run_knn():
     last_epoch = -1
     best_loss = math.inf
 
-    ckpt_file = os.path.join(experiment_dir_path,'best.pth.tar')
+    ckpt_file = os.path.join(experiment_dir_path,'400.pth.tar')
     if os.path.exists(ckpt_file):
         utils.load_checkpoint(ckpt_file,student,teacher)
     else:
         print("File:{} does not exists. Please check experiment name.".format(ckpt_file))
         exit(1)
 
-    student = student.backbone
-    student.eval()
-    teacher.eval()    
+    if args.model == 'student':
+        model = student
+    else:
+        model = teacher
+
+    model = model.backbone
+    model.eval()
 
     train_loader = get_dataloader(model_config,args.train_path)
     val_loader = get_dataloader(model_config,args.val_path)
-        
-    student_train_outs = []    
-    teacher_train_outs = []
+    
+    if os.path.exists('./rand.npy'):        
+        print('loaded')
+        with open('rand.npy', 'rb') as f:
+            rand_arr = np.load(f)
+    else:
+        with open('rand.npy', 'wb') as f:
+            rand_arr = rng.random(len(train_loader))
+            np.save(f, rand_arr)
+    
+    
+    
+    train_outs = []        
     train_y = []
 
-    student_val_outs = []
-    teacher_val_outs = []
+    val_outs = []
     val_y = []
 
+    class_counts = np.zeros(10)
     
     print(" === Evaluating === ")
-    for it, (images,labels) in enumerate(pbar :=tqdm(train_loader)):
+    
+    for it, (images,labels) in enumerate(pbar :=tqdm(train_loader)):        
+        if rand_arr[it] > args.train_percent:
+            continue
+
         images = torch.stack([img.cuda() for img in images])        
 
-        s_out = student(images).squeeze().detach().cpu().numpy()
-        t_out = teacher(images).squeeze().detach().cpu().numpy()
+        out = model(images).squeeze().detach().cpu().numpy()
         labels = labels.squeeze().detach().cpu().numpy()
 
-        student_train_outs.append(s_out)        
-        teacher_train_outs.append(t_out)
+        train_outs.append(out)        
         train_y.append(labels)
+        class_counts[labels] += 1
+
 
 
 
@@ -79,29 +103,22 @@ def run_knn():
     for it, (images,labels) in enumerate(pbar :=tqdm(val_loader)):
         images = torch.stack([img.cuda() for img in images])
 
-        s_out = student(images).squeeze().detach().cpu().numpy()
-        t_out = teacher(images).squeeze().detach().cpu().numpy()
+        out = model(images).squeeze().detach().cpu().numpy()
         labels = labels.squeeze().detach().cpu().numpy()
 
-        student_val_outs.append(s_out)
-        teacher_val_outs.append(t_out)
-
+        val_outs.append(out)
         val_y.append(labels)
 
 
-    estimator_student = KNeighborsClassifier()
-    estimator_teacher = KNeighborsClassifier()
-    estimator_student.fit(student_train_outs,train_y)
-    estimator_teacher.fit(teacher_train_outs,train_y)
+    estimator = KNeighborsClassifier()
+    estimator.fit(train_outs,train_y)
 
-    pred_val = estimator_student.predict(student_val_outs)    
-    student_acc = accuracy_score(val_y, pred_val)
-    pred_val = estimator_teacher.predict(teacher_val_outs)
-    teacher_acc = accuracy_score(val_y, pred_val)
+    pred_val = estimator.predict(val_outs)    
+    acc = accuracy_score(val_y, pred_val)
 
-    print("Student accuracy {}, Teacher accuracy {}".format(student_acc,teacher_acc))
+    print("Accuracy {}".format(acc))
     
-    return student_acc,teacher_acc
+    return acc
 
 
 
@@ -124,7 +141,6 @@ def get_dataloader(model_config,data_path):
         batch_size=1,
         num_workers=args.num_workers,
         pin_memory=True,
-        shuffle=True,
         drop_last=True
     )
     

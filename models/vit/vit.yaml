@@ -1,4 +1,4 @@
-arch: 'vit_small' #'vit_tiny','vit_small','vit_base'
+arch: 'vit_tiny' #'vit_tiny','vit_small','vit_base'
 patch_size: 16    #VIT square patch sizes. Default 16
 out_dim: 65536    #Dimensionality of the DINO head output, bigger valus for complex tax. Default 65536
 norm_last_layer: True #Whether or not normilize the last layer of DINO head. Increases Training stability

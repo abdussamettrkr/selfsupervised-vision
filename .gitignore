@@ -2,4 +2,5 @@
 *.swp
 *.pkl
 *.pth
+*npy
 *experiments*
